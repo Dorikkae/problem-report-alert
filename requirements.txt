@@ -1,0 +1,2 @@
+selenium>=4.25,<5
+pyinstaller>=6.10,<7
