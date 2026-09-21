@@ -2,7 +2,7 @@ import os, sys, json, time, threading, subprocess, socket, hashlib, urllib.reque
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
-APP='문제보고 알림'; VERSION='1.1.7'; PURPLE='#5F0080'
+APP='문제보고 알림'; VERSION='1.1.8'; PURPLE='#5F0080'
 BASE=Path(os.getenv('APPDATA',Path.home()))/'ProblemReportAlert'
 BASE.mkdir(parents=True,exist_ok=True)
 SETTINGS=BASE/'settings.json'; STATE=BASE/'state.json'; PROFILE=BASE/'chrome_profile'
@@ -64,8 +64,10 @@ def check_update(install=False):
     if not url: return {'ok':False,'configured':False,'error':'업데이트 서버 주소가 설정되지 않았습니다.'}
     if not url.lower().startswith('https://'): return {'ok':False,'error':'업데이트 주소는 HTTPS여야 합니다.'}
     try:
-        req=urllib.request.Request(url,headers={'User-Agent':APP+'/'+VERSION})
-        with urllib.request.urlopen(req,timeout=15) as r: m=json.loads(r.read().decode('utf-8'))
+        sep='&' if '?' in url else '?'
+        manifest_url=url+sep+'_ts='+str(int(time.time()))
+        req=urllib.request.Request(manifest_url,headers={'User-Agent':APP+'/'+VERSION,'Cache-Control':'no-cache','Pragma':'no-cache'})
+        with urllib.request.urlopen(req,timeout=15) as r: m=json.loads(r.read().decode('utf-8-sig'))
         latest=str(m['version']); newer=version_tuple(latest)>version_tuple(VERSION)
         if not newer: return {'ok':True,'update':False,'version':VERSION,'latest':latest}
         if not install: return {'ok':True,'update':True,'version':VERSION,'latest':latest}
@@ -80,11 +82,12 @@ def check_update(install=False):
         cur=os.path.abspath(sys.executable); bat=str(BASE/'apply_update.bat')
         script = (
             '@echo off\r\n'
+            'chcp 65001 >nul\r\n'
             'setlocal\r\n'
             'set "SRC='+tmp+'"\r\n'
             'set "DST='+cur+'"\r\n'
             'timeout /t 2 /nobreak >nul\r\n'
-            'for /L %%I in (1,1,20) do (\r\n'
+            'for /L %%I in (1,1,60) do (\r\n'
             '  copy /y "%SRC%" "%DST%" >nul 2>&1 && goto :done\r\n'
             '  timeout /t 1 /nobreak >nul\r\n'
             ')\r\n'
@@ -94,7 +97,7 @@ def check_update(install=False):
             'start "" "%DST%"\r\n'
             'del /q "%~f0" >nul 2>&1\r\n'
         )
-        Path(bat).write_text(script,'utf-8')
+        Path(bat).write_text(script,'utf-8-sig')
         subprocess.Popen(['cmd','/c',bat],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         threading.Timer(0.5,lambda: os._exit(0)).start()
         return {'ok':True,'installing':True,'latest':latest}
@@ -225,6 +228,9 @@ class H(SimpleHTTPRequestHandler):
                 c=cfg(); c['manual']=data.get('value'); save_json(SETTINGS,c); self.sendj({'ok':True}); return
             if p=='/api/check': self.sendj(check_once(True)); return
             if p=='/api/update_check': self.sendj(check_update(bool(data.get('install')))); return
+            if p=='/api/exit':
+                if self.client_address[0] not in ('127.0.0.1','::1'): self.sendj({'ok':False,'error':'local only'},403); return
+                self.sendj({'ok':True}); threading.Timer(0.15,shutdown_app).start(); return
             if p=='/api/slack_test': slack('🟣 문제보고 알림 테스트\nSlack 연결이 정상입니다.'); self.sendj({'ok':True}); return
             if p=='/api/login': chrome_login(); self.sendj({'ok':True}); return
             self.sendj({'ok':False},404)
@@ -238,6 +244,16 @@ def token():
 def auth(h):
     q=urllib.parse.parse_qs(urllib.parse.urlparse(h.path).query); return h.client_address[0] in ('127.0.0.1','::1') or q.get('token',[''])[0]==token() or h.headers.get('X-App-Token')==token()
 
+def shutdown_app():
+    global driver, server
+    try:
+        if driver: driver.quit()
+    except: pass
+    try:
+        if server: server.shutdown()
+    except: pass
+    os._exit(0)
+
 def open_app():
     url='http://127.0.0.1:8765/'
     edge=os.path.expandvars(r'%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe')
@@ -250,10 +266,16 @@ def main():
     threading.Thread(target=monitor,daemon=True).start()
     server=ThreadingHTTPServer(('0.0.0.0',8765),H)
     threading.Timer(1,open_app).start()
-    def auto_update():
-        r=check_update(False)
-        if r.get('ok') and r.get('update'):
-            check_update(True)
-    threading.Timer(5,auto_update).start()
+    def auto_update_loop():
+        time.sleep(5)
+        while True:
+            try:
+                r=check_update(False)
+                if r.get('ok') and r.get('update'):
+                    check_update(True)
+                    return
+            except: pass
+            time.sleep(300)
+    threading.Thread(target=auto_update_loop,daemon=True).start()
     server.serve_forever()
 if __name__=='__main__':main()
