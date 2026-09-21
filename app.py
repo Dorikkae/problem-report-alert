@@ -2,7 +2,7 @@ import os, sys, json, time, threading, subprocess, socket, hashlib, urllib.reque
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
-APP='문제보고 알림'; VERSION='1.1.4'; PURPLE='#5F0080'
+APP='문제보고 알림'; VERSION='1.1.5'; PURPLE='#5F0080'
 BASE=Path(os.getenv('APPDATA',Path.home()))/'ProblemReportAlert'
 BASE.mkdir(parents=True,exist_ok=True)
 SETTINGS=BASE/'settings.json'; STATE=BASE/'state.json'; PROFILE=BASE/'chrome_profile'
