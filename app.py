@@ -2,7 +2,7 @@ import os, sys, json, time, threading, subprocess, socket, hashlib, urllib.reque
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
-APP='문제보고 알림'; VERSION='1.1.5'; PURPLE='#5F0080'
+APP='문제보고 알림'; VERSION='1.1.6'; PURPLE='#5F0080'
 BASE=Path(os.getenv('APPDATA',Path.home()))/'ProblemReportAlert'
 BASE.mkdir(parents=True,exist_ok=True)
 SETTINGS=BASE/'settings.json'; STATE=BASE/'state.json'; PROFILE=BASE/'chrome_profile'
@@ -78,9 +78,25 @@ def check_update(install=False):
         import tempfile
         fd,tmp=tempfile.mkstemp(suffix='.exe'); os.close(fd); Path(tmp).write_bytes(data)
         cur=os.path.abspath(sys.executable); bat=str(BASE/'apply_update.bat')
-        Path(bat).write_text('@echo off\r\ntimeout /t 3 /nobreak >nul\r\ncopy /y "'+tmp+'" "'+cur+'" >nul\r\ndel /q "'+tmp+'" >nul 2>&1\r\nstart "" "'+cur+'"\r\ndel /q "%~f0"\r\n','utf-8')
+        script = (
+            '@echo off\r\n'
+            'setlocal\r\n'
+            'set "SRC='+tmp+'"\r\n'
+            'set "DST='+cur+'"\r\n'
+            'timeout /t 2 /nobreak >nul\r\n'
+            'for /L %%I in (1,1,20) do (\r\n'
+            '  copy /y "%SRC%" "%DST%" >nul 2>&1 && goto :done\r\n'
+            '  timeout /t 1 /nobreak >nul\r\n'
+            ')\r\n'
+            'exit /b 1\r\n'
+            ':done\r\n'
+            'del /q "%SRC%" >nul 2>&1\r\n'
+            'start "" "%DST%"\r\n'
+            'del /q "%~f0" >nul 2>&1\r\n'
+        )
+        Path(bat).write_text(script,'utf-8')
         subprocess.Popen(['cmd','/c',bat],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-        threading.Timer(1,lambda: os._exit(0)).start()
+        threading.Timer(0.5,lambda: os._exit(0)).start()
         return {'ok':True,'installing':True,'latest':latest}
     except Exception as e: return {'ok':False,'error':str(e)}
 
