@@ -2,7 +2,7 @@ import os, sys, json, time, threading, subprocess, socket, hashlib, urllib.reque
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
-APP='문제보고 알림'; VERSION='1.1.6'; PURPLE='#5F0080'
+APP='문제보고 알림'; VERSION='1.1.7'; PURPLE='#5F0080'
 BASE=Path(os.getenv('APPDATA',Path.home()))/'ProblemReportAlert'
 BASE.mkdir(parents=True,exist_ok=True)
 SETTINGS=BASE/'settings.json'; STATE=BASE/'state.json'; PROFILE=BASE/'chrome_profile'
@@ -176,6 +176,25 @@ def local_ip():
         s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); x=s.getsockname()[0]; s.close(); return x
     except:return '127.0.0.1'
 
+def tailscale_ip():
+    # Prefer Tailscale's own CLI. This works even when the LAN IP changes.
+    candidates=['tailscale.exe', r'C:\\Program Files\\Tailscale\\tailscale.exe']
+    for exe in candidates:
+        try:
+            flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
+            out=subprocess.check_output([exe,'ip','-4'], text=True, encoding='utf-8', errors='ignore', timeout=3, creationflags=flags).strip()
+            for line in out.splitlines():
+                ip=line.strip()
+                if ip.startswith('100.'):
+                    return ip
+        except Exception:
+            pass
+    return ''
+
+def mobile_url():
+    ip=tailscale_ip() or local_ip()
+    return f'http://{ip}:8765/?token='+token()
+
 class H(SimpleHTTPRequestHandler):
     def log_message(self,*a): pass
     def translate_path(self,path):
@@ -187,7 +206,7 @@ class H(SimpleHTTPRequestHandler):
     def do_GET(self):
         p=urllib.parse.urlparse(self.path)
         if p.path=='/api/state':
-            c=cfg(); s=st(); safe={k:v for k,v in c.items() if k not in ('slack_token',)}; safe['slack_token_set']=bool(c.get('slack_token')); self.sendj({'config':safe,'state':s,'effective':effective_running(),'scheduled':scheduled(c),'version':VERSION,'mobile_url':f'http://{local_ip()}:8765/?token='+token()}); return
+            c=cfg(); s=st(); safe={k:v for k,v in c.items() if k not in ('slack_token',)}; safe['slack_token_set']=bool(c.get('slack_token')); self.sendj({'config':safe,'state':s,'effective':effective_running(),'scheduled':scheduled(c),'version':VERSION,'mobile_url':mobile_url()}); return
         if p.path.startswith('/api/') and not auth(self): self.sendj({'ok':False,'error':'unauthorized'},403); return
         super().do_GET()
     def do_POST(self):
